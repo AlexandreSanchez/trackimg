@@ -1,0 +1,15 @@
+# General ignore patterns
+*.pyc
+
+# User-specific files
+
+# Common rules for Eclipse projects
+# src-gen folders are ignored with a specific .gitignore inside each
+bin
+build
+
+# Do not track CHANGELOG symlinks
+**/CHANGES
+**/CHANGELOG
+**/CHANGES.md
+**/CHANGELOG.md
