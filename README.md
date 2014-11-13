@@ -14,8 +14,6 @@ The Trackimg project is structured as follow :
 To compile, Trackimg depends on:
 - CMake (at least 2.8): http://www.cmake.org
 - OpenCV : http://opencv.org/
-- OpenMP : http://openmp.org
-- Eigen3 : http://eigen.tuxfamily.org
 
 To compile Trackimg, use cmake to generate build files corresponding to your environment.
 
