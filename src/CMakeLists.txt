@@ -12,4 +12,4 @@ set(headers
 
 add_executable(trackimg ${filenames} ${headers})
 
-target_link_libraries ( trackimg ${OpenCV_LIBS} )
+target_link_libraries ( trackimg ${OpenCV_LIBS})

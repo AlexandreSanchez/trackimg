@@ -40,7 +40,7 @@
 options::options() {
     m_nbProcessors = 1;
     m_verboseLevel = TRACKIMG_VL_QUIET;
-    m_inputDirectory = "/home/asanchez/sequences/videodata/datasets/animal/";
+    m_inputDirectory = "./animal/";
     m_objPos[0] = 153;
     m_objPos[1] = 4;
     m_objSize[0] = 41;
@@ -76,6 +76,10 @@ void options::setVerboseLevel(char* arg_value){
 
 void options::setInputDirectory(string arg_value){
     m_inputDirectory = arg_value;
+    m_objPos[0] = 0;
+    m_objPos[1] = 0;
+    m_objSize[0] = 0;
+    m_objSize[1] = 0;
 }
 
 int options::getNbProcessors() {
