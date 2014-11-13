@@ -28,9 +28,24 @@ Once Trackimg is built, you will find the resulting binary under `bin/<BUILD_TYP
 
 ## Use Trackimg
 
-TODO
-
 ### Command line
-
 Run Trackimg with the following options:
-TODO
+```sh
+Usage: trackimg [options] -d directory
+
+Description:
+Mono camera and mono object tracking in video sequences
+using LARS/LASSO algorithm.
+
+Required parameters:
+-d <directory>     The root directory of the targeted video dataset.
+
+Optional parameters:
+-n <nbproc>        Number of processor core. {Default : 1}
+-v <level>         Verbosity level
+   The possible values are: {Default : 1}
+       1 : summary and results
+       2 : debug informations
+-h                 Print this message.
+```
+
