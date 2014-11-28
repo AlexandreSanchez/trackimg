@@ -1582,11 +1582,11 @@ int main(int argc, char **argv) {
         case '?': // BADCH
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            //exit(TRACKIMG_ERR_BAD_ARGS);
+            exit(TRACKIMG_ERR_BAD_ARGS);
         case ':': // BADARG
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            //exit(TRACKIMG_ERR_BAD_ARGS);
+            exit(TRACKIMG_ERR_BAD_ARGS);
         case 'n':
             opt.setNbProcessors(atoi(optarg));
             break;
@@ -1598,11 +1598,11 @@ int main(int argc, char **argv) {
             break;
         case 'h':
             print_usage_trackimgmap();
-            //exit(TRACKIMG_OK);
+            exit(TRACKIMG_OK);
         default:
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            //exit(TRACKIMG_ERR_BAD_ARGS);
+            exit(TRACKIMG_ERR_BAD_ARGS);
         }
     }
 
