@@ -46,10 +46,11 @@
 #include <algorithm>
 #include <limits>
 #include <time.h>
-#include <unistd.h>
+//#include <unistd.h>
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/core/core.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
+#include "getopt.h"
 //#include <omp.h>
 
 #include "trackimg.h"
@@ -1489,6 +1490,87 @@ void print_usage_trackimgmap() {
     fflush(stdout);
 }
 
+int     opterr = 1,     /* if error message should be printed */
+optind = 1,     /* index into parent argv vector */
+optopt,         /* character checked for validity */
+optreset;       /* reset getopt */
+char*   optarg;         /* argument associated with option */
+
+#define    BADCH    (int)'?'
+#define    BADARG   (int)':'
+#define    EMSG     ""
+
+/*
+* getopt --
+*    Parse argc/argv argument vector.
+*/
+int getopt(int nargc, char * const *nargv, const char *ostr) {
+	/* option letter processing */
+	static char *place = EMSG;
+	/* option letter list index */
+	char *oli;
+
+	/* update scanning pointer */
+	if (optreset || !*place) {
+		optreset = 0;
+		if (optind >= nargc || *(place = nargv[optind]) != '-') {
+			place = EMSG;
+			return (-1);
+		}
+		/* found "--" */
+		if (place[1] && *++place == '-') {
+			++optind;
+			place = EMSG;
+			return (-1);
+		}
+	}
+	/* option letter okay? */
+	if ((optopt = (int)*place++) == (int)':' ) {
+		/*
+		* if the user didn't specify '-' as an option,
+		* assume it means -1.
+		*/
+		if (optopt == (int)'-')
+			return (-1);
+		if (!*place)
+			++optind;
+		if (opterr && *ostr != ':')
+			(void)fprintf(stderr, "%s: illegal option -- %c\n", nargv[0], optopt);
+		return (BADCH);
+	}
+	/* don't need argument */
+	/*if (*++oli != ':') {
+		optarg = NULL;
+		if (!*place)
+			++optind;
+	}*/
+	/* need an argument */
+	else {
+		/* no white space */
+		if (*place)
+			optarg = place;
+		/* no arg */
+		else if (nargc <= ++optind) {
+			place = EMSG;
+			if (*ostr == ':')
+				return (BADARG);
+			if (opterr)
+				(void)fprintf(stderr,
+				"%s: option requires an argument -- %c\n",
+				nargv[0], optopt);
+			return (BADCH);
+		}
+		/* white space */
+		else
+			optarg = nargv[optind];
+		place = EMSG;
+		++optind;
+	}
+	/* dump back option letter */
+	return (optopt);
+}
+
+
 int main(int argc, char **argv) {
     int c;
     const char *ostr = "d:n:v::h";
@@ -1500,11 +1582,11 @@ int main(int argc, char **argv) {
         case '?': // BADCH
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            exit(TRACKIMG_ERR_BAD_ARGS);
+            //exit(TRACKIMG_ERR_BAD_ARGS);
         case ':': // BADARG
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            exit(TRACKIMG_ERR_BAD_ARGS);
+            //exit(TRACKIMG_ERR_BAD_ARGS);
         case 'n':
             opt.setNbProcessors(atoi(optarg));
             break;
@@ -1516,11 +1598,11 @@ int main(int argc, char **argv) {
             break;
         case 'h':
             print_usage_trackimgmap();
-            exit(TRACKIMG_OK);
+            //exit(TRACKIMG_OK);
         default:
             print_trackimg_error(TRACKIMG_ERR_BAD_ARGS);
             print_usage_trackimgmap();
-            exit(TRACKIMG_ERR_BAD_ARGS);
+            //exit(TRACKIMG_ERR_BAD_ARGS);
         }
     }
 
