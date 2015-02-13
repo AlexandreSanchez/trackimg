@@ -61,6 +61,7 @@ using namespace cv;
 
 //#define UNIT_TEST
 //#define DEBUG
+//#define DEBUG_TMP
 
 //! TODO Use traces for all outputs
 //! TODO Print a FPS after each image printing
@@ -250,6 +251,10 @@ Mat imageseg(Mat R, int width, int widthStep, int heightStep, int w, int h, int 
 //im_seg_resize
 Mat im_seg_resize(Mat A,double h, double w, int wbh, int wbw, Mat sz )
 {
+#ifdef DEBUG
+    double start_time, end_time;
+    start_time = omp_get_wtime();
+#endif
     Mat a;
     A.copyTo(a);
     int m=a.rows;
@@ -265,15 +270,15 @@ Mat im_seg_resize(Mat A,double h, double w, int wbh, int wbw, Mat sz )
     y=cvFloor(wm/wbh)+1;
     x=cvFloor(wn/wbw)+1;
 
-    if ((sz.at<double>(1,0) - h)!=0  | (sz.at<double>(0,0) - w)!=0)
-    {
-        cout<<"wa ga ga"<<endl;
-    }
-
-    int jj=0,j=0;
-    int ii=0;int i=0;
+    int jj=0, j=0;
+    int ii=0, i=0;
     Mat subim(sz.at<double>(0,0)*sz.at<double>(1,0)*3+2, 1, CV_64F, Scalar::all(0));
+    vector<Mat> vectMAT;
 
+    int colToW = subim.cols - 1;
+    int iResize = 0;
+
+    //!TODO ASN : ADD PARALLELISM
     for (i=0; i<wm; i+=wbh)	//vertical
     {
         for (j=0; j<wn; j+=wbw)	//horizon
@@ -287,16 +292,35 @@ Mat im_seg_resize(Mat A,double h, double w, int wbh, int wbw, Mat sz )
             sb.at<double>(sb.rows-2, 0) = ii;
             sb.at<double>(sb.rows-1, 0) = jj;
 
-            transpose(subim, subim);
-            subim.resize(subim.rows+1, 0);
-            transpose(subim, subim);
-            sb.col(0).copyTo(subim.col(subim.cols - 1));
+            vectMAT.push_back(sb);
+            iResize++;
 
             jj++;
         }
         jj=0;
         ii++;
     }
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("im_seg_resize Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
+    transpose(subim, subim);
+    subim.resize(subim.rows+iResize, 0);
+    transpose(subim, subim);
+    for (std::vector<Mat>::iterator it = vectMAT.begin() ; it != vectMAT.end(); it++) {
+        Mat sb = *it;
+        sb.col(0).copyTo(subim.col(colToW++));
+    }
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("im_seg_resize Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
     Mat subim_sup=subim(Rect(1,0, subim.cols-1,subim.rows));
     Mat subim1;
     subim_sup.copyTo(subim1);
@@ -671,7 +695,7 @@ Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
     cp=cvRound(m/cr);		//cr must different 1 to active the random projection matrix, if cr=1 => don't use random projection and we can set it = 0
     int itx=T.cols;
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     double start_time, end_time;
     start_time = omp_get_wtime();
 #endif
@@ -692,7 +716,7 @@ Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
     Mat xx;
     vector<Mat> vectXX;
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("=== Rec_Lasso_loop Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -707,7 +731,7 @@ Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
         vectXX.push_back(xx);
     }
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("=== Rec_Lasso_loop Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -720,10 +744,9 @@ Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
         xx.row(0).copyTo(x.row(x.rows-1)); //copy xx to last row of x
         x.resize(x.rows+1, 0);
         transpose(x,x);
-        transpose(xx,xx);
     }
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("=== Rec_Lasso_loop Step 3 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -733,7 +756,7 @@ Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
     x.resize(x.rows-1,0); //delete last row of x, because in last loop, x will have 1 row unwanted
     transpose(x,x);
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("=== Rec_Lasso_loop Step 4 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
 #endif
@@ -745,7 +768,7 @@ int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
 {
     int flg;		//flg is always an integer ?
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     double start_time, end_time;
     start_time = omp_get_wtime();
 #endif
@@ -761,7 +784,7 @@ int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
     repeat(T_temp, T.rows, 1, T_temp);
     divide(T, T_temp, T);
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("Rec Lasso Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -779,7 +802,7 @@ int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
     divide(D, D_temp, D);   //!TODO ASN : ADD PARALLELISM
     int n=D.cols;
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("Rec Lasso Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -798,7 +821,7 @@ int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
         x[i] = Rec_Lasso_loop(T, D, cr, itr, param);
     }
 
-#ifdef DEBUG
+#ifdef DEBUG_TMP
     end_time = omp_get_wtime();
     printf("Rec Lasso Step 4 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
     start_time = omp_get_wtime();
@@ -861,6 +884,11 @@ int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
 
 Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat ScaR, Mat Sca_T, Mat Sca_R_N, parameter_OMP param, double cr, double itr, int wbh_d, int wbw_d, int wbh_n, int wbw_n, Mat sf, int k, int nff)
 {
+#ifdef DEBUG
+    double start_time, end_time;
+    start_time = omp_get_wtime();
+#endif
+
     string pathToData = opt.getInputDirectory() + "/output/";
     string extension = ".jpg";
     string index = to_string(k);
@@ -886,7 +914,15 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         double h = sz.at<double>(1,0);
         double w = sz.at<double>(0,0);
         //==========================================================//
+#ifdef DEBUG
+        double start_time_loop, end_time_loop;
+        start_time_loop = omp_get_wtime();
+#endif
         Mat subim_temp=im_seg_resize(Reg,h,w,wbh_d,wbw_d,Tar.siz.col(0)); //sliding windows
+#ifdef DEBUG
+    end_time_loop = omp_get_wtime();
+    printf("Rec_two_stage_sparse LOOP ===> %f msec (%.2f)\n", (end_time_loop-start_time_loop)*1000, end_time_loop-start_time_loop);
+#endif
         //===========creat Db_T contains [sliding windows; index; size]=========//
         Mat subim_temp1;
         repeat(sz,1,subim_temp.cols,subim_temp1);
@@ -900,6 +936,12 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         //=====================================================================//
     }
 
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec_two_stage_sparse Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
     //candidate objects in region for reitrival
     int md=Db_T.rows;
     int nd=Db_T.cols;
@@ -910,7 +952,19 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
     for (int i=0; i<sf.cols; i++)
     {Tar.fea.col(sf.at<double>(0,i)-1).copyTo(te.col(i));}
 
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec_two_stage_sparse Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
     int pv=Rec_Lasso(te, D, cr, itr, param);
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec_two_stage_sparse Step 3 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
 
     //		%%%%%%%%%%%%%%%% Second stage further verify recognition results%%%%%%%%%%%%%%%%%%%%%%
     if(pv!=999)	//object detected in 1st stage
@@ -938,7 +992,15 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         Mat ROI_D2_1 = D2(Rect(Tar.fea.cols, 0, D2.cols - Tar.fea.cols, Tar.fea.rows));
         Tar.feaN.copyTo(ROI_D2_1);
 
+#ifdef DEBUG
+    double start_time2, end_time2;
+    start_time2 = omp_get_wtime();
+#endif
         int pv2 = Rec_Lasso(t2, D2, cr, itr, param); //run detect in 2nd stage
+#ifdef DEBUG
+    end_time2 = omp_get_wtime();
+    printf("Rec_two_stage_sparse Rec_Lasso2 ===> %f msec (%.2f)\n", (end_time2-start_time2)*1000, end_time2-start_time2);
+#endif
         if((pv2>=0) & (pv2<=(Tar.fea.cols-1)))
         {
             //********* target is verified in the 1st part of dictionary => detection result of 1st stage is correct **************
@@ -1057,6 +1119,12 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         Tar.flag = Tar.flag +1;
     }//enlarge region
 
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec_two_stage_sparse Step 4 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
     return Tar;
 }
 
@@ -1143,7 +1211,7 @@ int start(options opt)
     merge(c1,a);
 
     //======================get selected object==========================//
-    waitKey(4000);
+    waitKey(2000);
 
     if (opt.getObjtPos(0)==0 && opt.getObjtPos(1)==0 && opt.getObjtSize(0)==0 && opt.getObjtSize(1)==0) {
     } else {
@@ -1268,6 +1336,7 @@ int start(options opt)
         //========================= detect failed =========================
         if (Tar.flag != 0)
         {
+            printf("Trackimg : Object lost\n");
             print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Trackimg : Object lost\n");
             //============= enlarge region for detection =================
             if (Tar.flag > 1)
@@ -1352,7 +1421,7 @@ int start(options opt)
         cumuled_time += (end_time-start_time);
         printf("Current average FPS : %.2f FPS  (%d frames in %f sec)\n\n", (it-1)/cumuled_time, (it-1), cumuled_time);
 
-        print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
+//        print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
     }
     waitKey(0);
     return 0;
