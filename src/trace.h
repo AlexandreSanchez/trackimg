@@ -55,17 +55,17 @@ extern verbose_level_et verbose_level;
 void set_trace_level(verbose_level_et level);
 
 /**
- * !TODO
+ *
  */
 void print_trackimg_error(trackimgmap_error_et error);
 
 /**
- * !TODO
+ *
  */
 bool check_verbosity(verbose_level_et level);
 
 /**
- * !TODO
+ *
  */
 void print_trackimg_trace(verbose_level_et level, const char *trace, ...);
 

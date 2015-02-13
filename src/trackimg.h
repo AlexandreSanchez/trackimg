@@ -34,7 +34,6 @@
 #define _TRACKIMG_H_
 
 /* Error codes */
-/* !TODO : Add more errors */
 typedef enum {
     TRACKIMG_OK = 0,
     TRACKIMG_ERR_BAD_ARGS,

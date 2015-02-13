@@ -50,24 +50,18 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/core/core.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
-//#include <omp.h>
+#include <omp.h>
 
 #include "trackimg.h"
 #include "options.h"
 #include "trace.h"
 
-//#include <eigen3/Eigen/Dense>
-//#include <eigen3/unsupported/Eigen/MatrixFunctions>
-
-//using namespace Eigen;
 using namespace std;
 using namespace cv;
 
-//#define TIME_MESURE
 //#define UNIT_TEST
 //#define DEBUG
 
-//! TODO Add options to select the lib used
 //! TODO Use traces for all outputs
 //! TODO Print a FPS after each image printing
 //! TODO Remove waitKey occurences
@@ -92,9 +86,6 @@ static const char *usage =
     "       2 : debug informations\n"
     "-h                 Print this message.\n";
 
-#ifdef TIME_MESURE
-ofstream time_mesure("time_mesure.txt");
-#endif
 
 #ifdef UNIT_TEST
 ofstream unit_test("unit.txt");
@@ -281,7 +272,7 @@ Mat im_seg_resize(Mat A,double h, double w, int wbh, int wbw, Mat sz )
 
     int jj=0,j=0;
     int ii=0;int i=0;
-    Mat subim(sz.at<double>(0,0)*sz.at<double>(1,0)*3+2, 1, CV_64F);
+    Mat subim(sz.at<double>(0,0)*sz.at<double>(1,0)*3+2, 1, CV_64F, Scalar::all(0));
 
     for (i=0; i<wm; i+=wbh)	//vertical
     {
@@ -435,27 +426,6 @@ Mat hist(Mat data, Mat nbins)
     return result;
 }	
 
-//Eigen::MatrixXf hist_Eigen(Eigen::MatrixXf data, Eigen::MatrixXf nbins)
-//{
-//    //frequency of each element of nbins in data
-//    //input data and nbins is rows vetor
-//    Eigen::MatrixXf result(1, nbins.cols());
-//    int freq=0;
-//    for (int jc=0; jc<nbins.cols(); jc++)	//each element of nbins
-//    {
-//        for (int ic=0; ic<data.cols(); ic++)	//each element of data
-//        {
-//            if(nbins(0,jc) == data(0,ic))
-//            {
-//                freq++;
-//            }
-//        }
-//        result(0,jc) = freq;
-//        freq = 0;
-//    }
-//    return result;
-//}
-
 Mat find_element_equal_less_zero(Mat scr)
 {
     vector<double> sign;
@@ -536,10 +506,7 @@ Mat lars_lu(Mat y, Mat X, double err, double nu)
 {
     //Dicitionary X, vector y,  nu is sparsity. Return vector coefficient
     /*================================================ LARS ALGORITHMS ==========================================*/
-#ifdef UNIT_TEST
-    unit_test<<"Enter lars_lu....................."<<endl;
-    unit_test<<"target y: "<<y.rows<<" "<<y.cols<<" Dic X: "<<X.rows<<" "<<X.cols<<endl;
-#endif
+
     int m=X.rows;
     int n=X.cols;
     Mat yr;
@@ -583,6 +550,7 @@ Mat lars_lu(Mat y, Mat X, double err, double nu)
     {
         Sa.at<double>(0,h)=Sa_array[h];
     }
+
     /*================================ WHILE LOOP ============================ */
     while(i<=nu && norm(yr)>err)
     {
@@ -696,12 +664,91 @@ Mat lars_lu(Mat y, Mat X, double err, double nu)
     return beta;
 }
 
-int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
+Mat Rec_Lasso_loop(Mat T, Mat D, double cr, double it, parameter_OMP param)
+{
+    int m=D.rows;
+    int cp;
+    cp=cvRound(m/cr);		//cr must different 1 to active the random projection matrix, if cr=1 => don't use random projection and we can set it = 0
+    int itx=T.cols;
+
+#ifdef DEBUG
+    double start_time, end_time;
+    start_time = omp_get_wtime();
+#endif
+
+    cv::theRNG().state =  time(NULL);
+    Mat cm(cp, m, CV_64F);
+    randn(cm, 0, 1);
+
+    //!TODO ASN : ADD PARALLELISM
+    // Bottleneck is mat multiplications
+    Mat tec;
+    tec=cm*T;
+
+    Mat Dc(cm.rows, D.cols, CV_64F);
+    Dc=cm*D;
+
+    Mat x(Dc.cols, 1, CV_64F); //because lars_lu return matrix beta with size = n*1
+    Mat xx;
+    vector<Mat> vectXX;
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("=== Rec_Lasso_loop Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
+    //!TODO ASN : ADD PARALLELISM
+    // Loop costly one call on two of Rec_Lasso_loop
+//    #pragma omp parallel for
+    for (int j=0; j<itx; j++)
+    {
+        xx=lars_lu(tec.col(j), Dc, param.err, param.nu);
+        vectXX.push_back(xx);
+    }
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("=== Rec_Lasso_loop Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
+    for (std::vector<Mat>::iterator it = vectXX.begin() ; it != vectXX.end(); it++) {
+        xx = *it;
+        transpose(x,x);		//for first loop, x is already defined as row vector
+        transpose(xx,xx); //now, xx is a row vector
+        xx.row(0).copyTo(x.row(x.rows-1)); //copy xx to last row of x
+        x.resize(x.rows+1, 0);
+        transpose(x,x);
+        transpose(xx,xx);
+    }
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("=== Rec_Lasso_loop Step 3 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
+    transpose(x,x);
+    x.resize(x.rows-1,0); //delete last row of x, because in last loop, x will have 1 row unwanted
+    transpose(x,x);
+
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("=== Rec_Lasso_loop Step 4 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+#endif
+
+    return x;
+}
+
+int Rec_Lasso(Mat T, Mat D, double cr, double itr, parameter_OMP param )
 {
     int flg;		//flg is always an integer ?
 
-//    double start_time, end_time;
-//    start_time = omp_get_wtime();
+#ifdef DEBUG
+    double start_time, end_time;
+    start_time = omp_get_wtime();
+#endif
 
     Mat T_temp;
     pow(T,2,T_temp);
@@ -714,8 +761,14 @@ int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
     repeat(T_temp, T.rows, 1, T_temp);
     divide(T, T_temp, T);
 
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec Lasso Step 1 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
     Mat D_temp;
-    pow(D,2,D_temp);
+    pow(D,2,D_temp);   //!TODO ASN : ADD PARALLELISM
     reduce(D_temp, D_temp, 0, CV_REDUCE_SUM, CV_64F);
 
     for (int i=0; i<D_temp.cols; i++)
@@ -723,67 +776,42 @@ int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
         D_temp.at<double>(0,i)=sqrt(D_temp.at<double>(0,i));
     }
     repeat(D_temp, D.rows, 1, D_temp);
-    divide(D, D_temp, D);
-    int m=D.rows;
+    divide(D, D_temp, D);   //!TODO ASN : ADD PARALLELISM
     int n=D.cols;
 
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec Lasso Step 2 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
+
+    int i;
     Mat be;
-    int itx=T.cols;
+    //!TODO ASN : dynamic size for x[]
+    Mat x[3];
 
-    int i=0;
-    for (i=0; i<it; i++)	//from 0?
+    //!TODO ASN : ADD PARALLELISM
+    // Depend on itr (default=3) => real parallelism but limited because increase itr only increase accuracy
+    #pragma omp parallel for private(i)
+    for (i=0; i<(int)itr; i++)	//from 0?
     {
-        int cp;
-        cp=cvRound(m/cr);		//cr must different 1 to active the random projection matrix, if cr=1 => don't use random projection and we can set it = 0
-        Mat cm(cp, m, CV_64F);
-        randn(cm, 0, 1);
-        Mat tec;
-        tec=cm*T;
-        Mat Dc(cm.rows, D.cols, CV_64F);
-        Dc=cm*D;
-//        double start_loop_time = omp_get_wtime();
+        x[i] = Rec_Lasso_loop(T, D, cr, itr, param);
+    }
 
-        Mat x(Dc.cols, 1, CV_64F); //because lars_lu return matrix beta with size = n*1
-        int j=0;
-        Mat xx;
+#ifdef DEBUG
+    end_time = omp_get_wtime();
+    printf("Rec Lasso Step 4 ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
+    start_time = omp_get_wtime();
+#endif
 
-//        end_time = omp_get_wtime();
-//        printf("Rec Lasso Step 1 ===> %f msec (%.2f)\n", (end_time-start_loop_time)*1000, end_time-start_loop_time);
-        for (j=0; j<itx; j++)
-        {
-            //auto begin1 = std::chrono::high_resolution_clock::now();
-            xx=lars_lu(tec.col(j), Dc, param.err, param.nu);
-            //auto end1 = std::chrono::high_resolution_clock::now();
-            //cout << std::chrono::duration_cast<std::chrono::milliseconds>(end1-begin1).count() <<" ms"<<endl;
-
-            transpose(x,x);		//for first loop, x is already defined as row vector
-            transpose(xx,xx); //now, xx is a row vector
-            xx.row(0).copyTo(x.row(x.rows-1)); //copy xx to last row of x
-            x.resize(x.rows+1, 0);
-            transpose(x,x);
-            transpose(xx,xx);
-        }
-//        end_time = omp_get_wtime();
-//        printf("Rec Lasso Step 2 ===> %f msec (%.2f)\n", (end_time-start_loop_time)*1000, end_time-start_loop_time);
-
-        transpose(x,x);
-        x.resize(x.rows-1,0); //delete last row of x, because in last loop, x will have 1 row unwanted
-        transpose(x,x);
-
-        if(x.rows != be.rows)	//first loop
-        {
-            x.copyTo(be);
-        }
-        else
-        {
-            transpose(be,be);
-            be.resize(be.rows + x.cols,0);
-            transpose(be,be);
-            Mat ROI_be_new=be(Rect(x.cols*i, 0, x.cols, x.rows));
-            x.copyTo(ROI_be_new);
-        }
-//        end_time = omp_get_wtime();
-//        printf("Rec Lasso Step 3 ===> %f msec (%.2f)\n", (end_time-start_loop_time)*1000, end_time-start_loop_time);
+    x[0].copyTo(be);
+    for (i=1; i<itr; i++)
+    {
+        transpose(be,be);
+        be.resize(be.rows + x[i].cols,0);
+        transpose(be,be);
+        Mat ROI_be_new=be(Rect(x[i].cols*i, 0, x[i].cols, x[i].rows));
+        x[i].copyTo(ROI_be_new);
     }
 
     /*=======================================max frequency========================================*/
@@ -792,7 +820,6 @@ int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
     reduce(be, mvm, 0, CV_REDUCE_MAX, CV_64F);//find mvm is maximum of each column of be
     Mat pvm_temp(be.rows, 1, CV_64F);//to store each column of be to find index of mvm
     Mat pvm(1, be.cols, CV_64F);//find pvm is indexs of each mvm in each column
-
     int h=0;
     for (h=0; h<mvm.cols; h++)
     {
@@ -821,7 +848,6 @@ int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
     if (maxLoc_ph.x==mvm.cols) {
         pv=n;
     }
-
     /*===========================================================================================*/
     if (pv <= n-1)	// n can equal 0
     {
@@ -830,134 +856,8 @@ int Rec_Lasso(Mat T, Mat D, double cr, double it, parameter_OMP param )
         flg=999;
     }
 
-//    end_time = omp_get_wtime();
-//    printf("Rec Lasso Total ===> %f msec (%.2f)\n", (end_time-start_time)*1000, end_time-start_time);
-
     return flg;
 }
-
-//int Rec_Lasso_Eigen(Mat T, Mat D, double cr, double it, parameter_OMP param )
-//{
-//    int flg;		//flg is always an integer ?
-
-//    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> T_Eigen(T.ptr<float>(), T.rows, T.cols);
-//    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> D_Eigen(D.ptr<float>(), D.rows, D.cols);
-
-//    Eigen::MatrixXf T_temp;
-//    T_temp = T_Eigen.pow(2);
-//    T_temp = T_temp.rowwise().sum();
-
-//    for (int i=0; i<T_temp.cols(); i++)
-//    {
-//        T_temp(0,i)=sqrt(T_temp(0,i));
-//    }
-//    T_temp = T_temp.replicate<T.rows,1>();
-//    T_Eigen = T_Eigen / T_temp;
-
-//    Eigen::MatrixXf D_temp;
-//    D_temp = D_Eigen.pow(2);
-//    D_temp = D_temp.rowwise().sum();
-
-//    for (int i=0; i<D_temp.cols(); i++)
-//    {
-//        D_temp(0,i)=sqrt(D_temp(0,i));
-//    }
-//    D_temp = D_temp.replicate<D.rows,1>();
-//    D_Eigen = D_Eigen / D_temp;
-
-//    int m=D.rows;
-//    int n=D.cols;
-
-//    Eigen::MatrixXf be;
-//    int itx=T.cols;
-
-//    for (int i=0; i<it; i++)	//from 0?
-//    {
-//        int cp;
-//        cp=cvRound(m/cr);		//cr must different 1 to active the random projection matrix, if cr=1 => don't use random projection and we can set it = 0
-//        Eigen::MatrixXf cm(cp, m);
-//        cm = Eigen::MatrixXf::Random(cp, m);
-//        Eigen::MatrixXf tec;
-//        tec=cm*T_Eigen;
-//        Eigen::MatrixXf Dc(cm.rows(), D.cols);
-//        Dc=cm*D_Eigen;
-//        Eigen::MatrixXf x(Dc.cols(), 1); //because lars_lu return matrix beta with size = n*1
-//        //=======OMP========
-//        for (int j=0; j<itx; j++)
-//        {
-//            //auto begin1 = std::chrono::high_resolution_clock::now();
-//            Mat xx=lars_lu(tec.col(j), Dc, param.err, param.nu);
-//            //auto end1 = std::chrono::high_resolution_clock::now();
-//            //cout << std::chrono::duration_cast<std::chrono::milliseconds>(end1-begin1).count() <<" ms"<<endl;
-
-//            x = x.transpose();
-//            xx = xx.transpose();
-
-//            xx.row(0).copyTo(x.row(x.rows()-1)); //copy xx to last row of x
-//            x.conservativeResize(x.rows()+1, NoChange);
-//            x.raw(x.rows()+1) = ArrayXf::Zero(x.cols());
-
-//            x = x.transpose();
-//            xx = xx.transpose();
-//        }
-//        x = x.transpose();
-//        x.conservativeResize(x.rows()-1, NoChange); //delete last row of x, because in last loop, x will have 1 row unwanted
-//        x = x.transpose();
-
-//        if(x.rows() != be.rows())	//first loop
-//        {
-//            be = x;
-//        } else {
-//            be = be.transpose();
-//            be.resize(be.rows() + x.cols(),0);
-//            be = be.transpose();
-//            Mat ROI_be_new=be(Rect(x.cols()*i, 0, x.cols(), x.rows()));
-//            x.copyTo(ROI_be_new);
-//        }
-//    }
-//    /*=======================================max frequency========================================*/
-//    Eigen::MatrixXf mvm;
-//    //	double SEUIL = -1.0;
-//    mvm = be.colwise().maxCoeff();//find mvm is maximum of each column of be
-//    Eigen::MatrixXf pvm_temp(be.rows(), 1);//to store each column of be to find index of mvm
-//    Eigen::MatrixXf pvm(1, be.cols());//find pvm is indexs of each mvm in each column
-//    for (int h=0; h<mvm.cols(); h++)
-//    {
-//        be.col(h).copyTo(pvm_temp);//take each column of be
-//        double minVal_be, maxVal_be;
-//        Point minLoc_be, maxLoc_be;
-//        maxVal_be = be.maxCoeff(&maxLoc_be.x, &maxLoc_be.y);
-//        minVal_be = be.minCoeff(&minLoc_be.x, &minLoc_be.y);
-//        pvm(0,h) = maxLoc_be.y;//index of mvm is index of max element of current column
-//    }
-
-//    Eigen::MatrixXf up(1, be.rows()+1);	//contains index of atom in Dictionary, begin from 0
-//    for (int h=0; h<up.cols(); h++)
-//    {
-//        up(0,h) = h;
-//    }
-
-//    Eigen::MatrixXf ph=hist_Eigen(pvm,up);//ph is a row vector
-//    //find max value mvv of ph and index of max value pvv in ph
-//    double minVal_ph, mvv;
-//    Point minLoc_ph, maxLoc_ph;
-//    mvv = ph.maxCoeff(&maxLoc_ph.x, &maxLoc_ph.y);
-//    minVal_ph = ph.minCoeff(&minLoc_ph.x, &minLoc_ph.y);
-//    int pvv = maxLoc_ph.x;
-//    double pv=up(0,pvv);
-//    if (maxLoc_ph.x==mvm.cols()) {
-//        pv=n;
-//    }
-
-//    /*===========================================================================================*/
-//    if (pv <= n-1)	// n can equal 0
-//    {
-//        flg=pv;
-//    } else {
-//        flg=999;
-//    }
-//    return flg;
-//}
 
 Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat ScaR, Mat Sca_T, Mat Sca_R_N, parameter_OMP param, double cr, double itr, int wbh_d, int wbw_d, int wbh_n, int wbw_n, Mat sf, int k, int nff)
 {
@@ -972,6 +872,7 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
     Mat sz;
     Mat subim;
     Mat Db_T;
+
     /*=================== Get Dictationary (Db_T) that contains data of sliding windows (subim) in various size ==========*/
     for (int ir=0; ir < Sca_T.cols; ir++)
     {
@@ -998,6 +899,7 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         subim.copyTo(Db_T);
         //=====================================================================//
     }
+
     //candidate objects in region for reitrival
     int md=Db_T.rows;
     int nd=Db_T.cols;
@@ -1007,8 +909,8 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
     Mat te(Tar.fea.rows, sf.cols, CV_64F);
     for (int i=0; i<sf.cols; i++)
     {Tar.fea.col(sf.at<double>(0,i)-1).copyTo(te.col(i));}
+
     int pv=Rec_Lasso(te, D, cr, itr, param);
-    cout << "pv= " << pv << endl;
 
     //		%%%%%%%%%%%%%%%% Second stage further verify recognition results%%%%%%%%%%%%%%%%%%%%%%
     if(pv!=999)	//object detected in 1st stage
@@ -1037,7 +939,6 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
         Tar.feaN.copyTo(ROI_D2_1);
 
         int pv2 = Rec_Lasso(t2, D2, cr, itr, param); //run detect in 2nd stage
-        cout<< "pv2= " << pv2 << endl;
         if((pv2>=0) & (pv2<=(Tar.fea.cols-1)))
         {
             //********* target is verified in the 1st part of dictionary => detection result of 1st stage is correct **************
@@ -1137,10 +1038,8 @@ Tar_properties Rec_two_stage_sparse(options opt, Mat b, Tar_properties Tar, Mat 
             merge(BGR4,c4);
             c4.convertTo(c4,CV_8UC3);
             rectangle(c4, Point(ppp.at<double>(0,0), ppp.at<double>(1,0)), Point(ppp.at<double>(0,0) + ppp.at<double>(2,0), ppp.at<double>(1,0) + ppp.at<double>(3,0)), Scalar(0,0, 255), 1);
-//            cout << "Tracking result: " << ppp << endl;
             imshow("animal", c4);
             waitKey(1);
-            imwrite( pathToData, c4 );
 
             //add ppp to Tar_posres
             transpose(Tar.posres, Tar.posres);
@@ -1207,11 +1106,6 @@ int start(options opt)
     wbw.n=10;
     wbh.n=10;
 
-#ifdef TIME_MESURE
-    time_mesure<<"wbw.d="<<wbw.d<<"  wbw.n="<<wbw.n<<endl;
-    time_mesure<<"wbh.d="<<wbh.d<<"  wbh.n="<<wbh.n<<endl;
-#endif
-
     int wbw_d=4; //for object segment in ROI (for animal: wbw_d=4 ; wbw_n=10)
     int wbh_d=4;
     int wbw_n=10; //for background sample
@@ -1220,17 +1114,10 @@ int start(options opt)
     int vg=1;   //scale Gaussian noise for initial samples
     double cr=30; //Gaussian compression rate in lasso recognition (for animal: 30 - 3/4)
     double itr=3;  //iterative times for random compression in lasso recognition
-#ifdef TIME_MESURE
-    time_mesure<<"cr="<<cr<<"  itr="<<itr<<endl;
-#endif
 
     // ========== error for OMP ============//
     param.err=0.001;
     param.nu=20;
-
-#ifdef TIME_MESURE
-    time_mesure<<"param.err="<<param.err<<"  param.nu="<<param.nu<<endl;
-#endif
 
     /*===============================================================================================================*/
 
@@ -1256,20 +1143,24 @@ int start(options opt)
     merge(c1,a);
 
     //======================get selected object==========================//
-    waitKey(7000);
+    waitKey(4000);
 
-    // !TODO : ASN Next line for example capture zone
     if (opt.getObjtPos(0)==0 && opt.getObjtPos(1)==0 && opt.getObjtSize(0)==0 && opt.getObjtSize(1)==0) {
     } else {
         p.at<double>(0,0)=opt.getObjtPos(0); p.at<double>(1,0)=opt.getObjtPos(1) ;sz.at<double>(0,0)=opt.getObjtSize(0); sz.at<double>(1,0)=opt.getObjtSize(1);
     }
 
+    // !TODO : ASN Next lines for example capture zone
+    p.at<double>(0,0)=153;
+    p.at<double>(1,0)=4;
+    sz.at<double>(0,0)=41;
+    sz.at<double>(1,0)=30;
 
     Mat aa(sz.at<double>(0,0),sz.at<double>(1,0), CV_64FC3); //selected object
     aa = a(Rect(p.at<double>(0,0), p.at<double>(1,0), sz.at<double>(0,0), sz.at<double>(1,0)));
     rectangle(a_c, Point(p.at<double>(0,0), p.at<double>(1,0)), Point(p.at<double>(0,0)+sz.at<double>(0,0),  p.at<double>(1,0)+sz.at<double>(1,0)), Scalar(0,0, 255), 2);
     imshow("animal", a_c);
-    waitKey(2);
+
     //===================== initialize TAR set =========================//
 
     /*================= Create Tar.fea ========================
@@ -1340,8 +1231,9 @@ int start(options opt)
     double cumuled_time=0.0;
     for (int it=2; it<le; it++)
     {
-//        double start_time, end_time;
-//        start_time = omp_get_wtime();
+        double start_time, end_time;
+        start_time = omp_get_wtime();
+        printf("ASN : startTracking in image nb %d\n", it);
         k++;
         //================read next image========================
         string extension = ".jpg";
@@ -1365,30 +1257,22 @@ int start(options opt)
         //======================== detect succesfull ======================
         if (Tar.flag == 0)
         {
+            print_trackimg_trace(TRACKIMG_VL_VERBOSE_2, "Trackimg : Object found\n");
             //before run 2nd frame, Tar_flag = 0 bcz initialize in 1st frame = 0
             Mat ScaR;
             Sca_R.copyTo(ScaR);
             Tar = Rec_two_stage_sparse(opt, b, Tar, ScaR, Sca_T, Sca_R_N, param, cr, itr, wbh_d, wbw_d, wbh_n, wbw_n, sf, k, nff);
-
-            if(k>=5){
-                Mat time_plot(1,time.size(),CV_64F);
-                for (int ihh=0; ihh<time_plot.cols; ihh++){
-                    time_plot.at<double>(0,ihh)=time[ihh]/1000;
-#ifdef TIME_MESURE
-                    time_mesure<<"time_cv="<<time_plot<<endl;
-#endif
-                }
-            }
         }
 
         Mat balance (Tar.pnew.rows, 1, CV_64F);
         //========================= detect failed =========================
         if (Tar.flag != 0)
         {
-            cout << "Object lost" << endl;
+            print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Trackimg : Object lost\n");
             //============= enlarge region for detection =================
             if (Tar.flag > 1)
             {
+                print_trackimg_trace(TRACKIMG_VL_VERBOSE_2, "Trackimg : Object lost : try to detect in bigger region\n");
                 //======= try to detect in bigger region =======
                 Mat ScaR;
                 Sca_R_O.copyTo(ScaR);
@@ -1397,6 +1281,7 @@ int start(options opt)
             // =========== after detect in enlarge region ===============
             if (Tar.flag != 0)
             {
+                print_trackimg_trace(TRACKIMG_VL_VERBOSE_2, "Trackimg : Object lost : after detect in enlarge region\n");
                 //************ Tar_flag = 1
                 //=========display image b========//
                 vector<Mat> RGB3;
@@ -1421,7 +1306,6 @@ int start(options opt)
                     {
                         balance.at<double>(ih,0) = 0;
                     }
-                    //cout<<"calculate balance, fill with 0= "<<balance<<endl;
                 }
                 else
                 {//=============calculate balance===========
@@ -1431,7 +1315,6 @@ int start(options opt)
                     Mat temp2; ROI_Tar_pnew_mean_2.copyTo(temp2);
                     Mat sum = temp1 - temp2;
                     reduce(sum, balance, 1, CV_REDUCE_AVG);
-                    //cout<<"calculate balance= "<<balance<<endl;
                 }
                 //calculate Tar.pnew base on balance and update Tar.pnew
                 Mat Tar_pnew_temp(Tar.pnew.rows, 1, CV_64F);
@@ -1452,13 +1335,6 @@ int start(options opt)
                 imshow("animal", c3);
                 waitKey(5);
 
-                //save result to image
-                string pathToData = opt.getInputDirectory() + "/output/";
-                string extension = ".jpg";
-                string index = to_string(k);
-                pathToData = pathToData + index + extension;
-                imwrite( pathToData, c3 );
-
                 Tar.flag = Tar.flag + 1;
                 Mat Tar_posres_temp (Tar.pnew.rows + Tar.siz.rows, 1, CV_64F);
                 Mat ROI_Tar_posres_temp = Tar_posres_temp(Rect(0, 0, 1, Tar.pnew.rows));
@@ -1470,15 +1346,13 @@ int start(options opt)
                 transpose(Tar.posres, Tar.posres);
                 Tar_posres_temp.col(0).copyTo(Tar.posres.col(Tar.posres.cols-1));
             }
-            //display text in frame...
-            //mov(k) = getframe ????? //use to return a movie from sequence frame.
         }
-//        end_time = omp_get_wtime();
-//        printf("Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
-//        cumuled_time += (end_time-start_time);
-//        printf("Current average FPS : %.2f FPS  (%d frames in %f sec)\n\n", (it-1)/cumuled_time, (it-1), cumuled_time);
+        end_time = omp_get_wtime();
+        printf("Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
+        cumuled_time += (end_time-start_time);
+        printf("Current average FPS : %.2f FPS  (%d frames in %f sec)\n\n", (it-1)/cumuled_time, (it-1), cumuled_time);
 
-//        print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
+        print_trackimg_trace(TRACKIMG_VL_VERBOSE_1, "Frame %d decoded in %f msec (%.2f FPS)\n", it, (end_time-start_time)*1000, 1/(end_time-start_time));
     }
     waitKey(0);
     return 0;
